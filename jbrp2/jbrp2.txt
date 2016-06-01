@@ -1,0 +1,6 @@
+"jbrp2"
+{
+	"base"		"sandbox"
+	"title"		"jbrp2"
+	"menusystem"	"1"
+}
