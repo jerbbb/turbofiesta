@@ -1,19 +1,13 @@
 include("shared.lua")
 
+net.Receive("CharacterList", function()
+	NameList = net.ReadTable()
+	PrintTable(NameList)
+
+end)
 --GM Hooks
 function GM:Initialize()
-Universe = {}
 
-end
-
-function GM:PlayerDeath( ply, inflictor, attacker )
-
-	-- Don't spawn for at least 2 seconds
-	ply.NextSpawnTime = CurTime() + 2
-	ply.DeathTime = CurTime()
-	
-	return
-	
 end
 
 function GM:OnPlayerChat(Player, Text, TeamOnly, PlayerIsDead)
@@ -32,10 +26,13 @@ function GM:HUDDrawTargetID()
 	
 	if ( trace.Entity:IsPlayer() ) then
 		text = "Unknown"
-		local ViewedID = Universe.Players[trace.Entity:SteamID()].Characters[Universe.Players[trace.Entity:SteamID()].CurrentCharacter].CharID
+		local ViewedID = GetCharID(trace.Entity)
 		--if Universe.Players[LocalPlayer():SteamID()].Characters[Universe.Players[LocalPlayer():SteamID()] != nil then
-		for k,v in pairs(GetCharacter(LocalPlayer()).KnownPlayers) do
-			if k == ViewedID then
+		for k,v in pairs(util.JSONToTable(LocalPlayer():GetNWString("AliasTable"))) do
+			print(ViewedID)
+			print(k)
+			if tonumber(k) == tonumber(ViewedID) then
+				print("Got him")
 				text = v
 				
 			end
@@ -72,7 +69,7 @@ function GM:HUDDrawTargetID()
 	
 	y = y + h + 5
 	
-	local text = Universe.Players[trace.Entity:SteamID()].Characters[Universe.Players[trace.Entity:SteamID()].CurrentCharacter].Description
+	local text = GetDescription(trace.Entity)
 	local font = "TargetIDSmall"
 	
 	surface.SetFont( font )
@@ -86,11 +83,6 @@ function GM:HUDDrawTargetID()
 end
 
 --Network Hooks
-
-net.Receive("ClientSync", function()
-	Universe = net.ReadTable()
-	
-end)
 
 net.Receive("ChatSent", function()
 	chat.AddText(Color(100, 255, 100), net.ReadString())
@@ -122,8 +114,8 @@ concommand.Add("characterselect", function()
 	DComboBox:SetSize( 100, 20 )
 	DComboBox:SetValue("Select Character")
 	
-	for k,v in pairs(Universe.Players[LocalPlayer():SteamID()].Characters) do
-		DComboBox:AddChoice(k)
+	for k,v in pairs(NameList) do
+		DComboBox:AddChoice(v)
 		
 	end
 
