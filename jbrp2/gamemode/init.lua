@@ -1,96 +1,44 @@
 AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
 include("shared.lua")
-util.AddNetworkString("ClientSync")
+util.AddNetworkString("CharacterList")
 util.AddNetworkString("ChatSent")
-
--- Database Commands
-function Synchronize()
-	sql.Query("UPDATE jbrp_data SET universe = '"..util.TableToJSON(Universe).."'") --file.Write("jbm.txt", util.TableToJSON(Universe))
-	net.Start("ClientSync")
-	net.WriteTable(Universe)
-	net.Broadcast()
-	
-end
-
-concommand.Add("adminsynchronize", Synchronize) --Temporary testing command
-
-function Load()
-	local Value = sql.QueryValue("SELECT universe FROM jbrp_data")
-	if Value == false then
-		Value = {}
-		
-	else
-		Value = util.JSONToTable(Value)
-		
-	end
-	Universe = Value--Universe = util.JSONToTable(file.Read("jbm.txt"))
-	
-	Synchronize()
-	
-end
-
-concommand.Add("adminload", Load) --Temporary testing command
-
-concommand.Add("checkserver", function() PrintTable(Universe)end) --Temporary testing command
-
-concommand.Add("adminwipe", function() --Temporary testing command
-sql.Query("DROP TABLE jbrp_data")
-print(sql.LastError())
-end)
-
+function checkerror() print(sql.LastError()) end
+concommand.Add("adminwipe", function() sql.Query("DROP TABLE player_data") sql.Query("DROP TABLE character_data") checkerror() end)
 --GM Hooks
 
 function GM:Initialize()
-	Universe = {}
 	
-	if sql.TableExists("jbrp_data") then--if file.Exists("jbm.txt", "DATA") then
-		Universe = util.JSONToTable(sql.QueryValue("SELECT universe FROM jbrp_data"))
-		
-	else
-		local Template = {}
-		Template.Players = {}
-		Template.Objects = {}
-		Template.Joined = {}
-		Universe = Template
-		sql.Query("CREATE TABLE jbrp_data (universe longtext)")
-		sql.Query("INSERT INTO jbrp_data ('universe') VALUES ('"..util.TableToJSON(Universe).."')")
-		
+	if not sql.TableExists("player_data") then
+		sql.Query("CREATE TABLE player_data (player_uniqueid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, steamid varchar(20), player_flags varchar(100))")
+		--checkerror()
 	end
 	
-	Synchronize()
+	if not sql.TableExists("character_data") then
+		sql.Query("CREATE TABLE character_data (character_uniqueid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, creator_uniqueid mediumint, name varchar(255), description varchar(255), character_flags varchar(100), alias_table text, model varchar(255))")
+		--checkerror()
+	end
 	
 end
 
+function GM:PlayerInitialSpawn(Player)
+	
+	if not sql.Query("SELECT 1 from player_data WHERE steamid = '"..Player:SteamID().."'") then
+		sql.Query("INSERT INTO player_data (steamid, player_flags) VALUES ('"..Player:SteamID().."', '')")
+		--checkerror()
+	end
+	
+	Player:SetNWInt("UniqueID", sql.QueryValue("SELECT player_uniqueid FROM player_data WHERE steamid = '"..Player:SteamID().."'"))
+	
+	UpdateCharacterList(Player)
+	
+	Player:KillSilent()
+	Player:ConCommand("characterselect")
+	Player.CharSelected = false
+
+end
+
 function GM:PlayerSpawn(Player)
-	local Joined = false
-	
-	for k, v in pairs(Universe.Joined) do
-		if v == Player:SteamID() then
-			Joined = true
-			
-		end
-		
-	end
-	
-	if not Joined then
-		table.insert(Universe.Joined, #Universe.Joined + 1, Player:SteamID())
-		local Template = {}
-		Template.Characters = {}
-		Template.CurrentCharacter = ""
-		Universe.Players[Player:SteamID()] = Template
-		
-	end
-	
-	if not Player.CharSelected then
-		Player.CharSelected = false
-		Player:KillSilent()
-		Player:ConCommand("characterselect")
-		
-	end
-	
-	Synchronize()
-	Player:SetModel("models/player/odessa.mdl")
 	
 end
 
@@ -111,7 +59,6 @@ function GM:PlayerSay(Player, Text, Team)
 	local SpeakRange = 500
 	local Words = {}
 	Words[1], Words[2] = Text:match("(%w+)(.+)")
-	print(Words[1])
 	local Commands = {}
 	Commands["rec"] = "recognize"
 	Commands["recognize"] = "recognize"
@@ -161,8 +108,9 @@ function GM:PlayerSay(Player, Text, Team)
 			local Known = false
 			local Name = ""
 			
-			for k2, v2 in pairs(v1.KnownPlayers) do
-				if k2 == Player.CharID then
+			for k2, v2 in pairs(v1.AliasTable) do
+			
+				if tonumber(k2) == tonumber(GetCharID(Player)) then
 					Known = true
 					Name = v2
 					
@@ -194,11 +142,10 @@ concommand.Add("choosechar", function (Player, Command, Args)
 end)
 
 concommand.Add("createchar", function( Player, Command, Args)
-		CreateCharacter(Player, Args[1], Args[2])
+		CreateCharacter(Player, Args[1], Args[2], "models/player/police.mdl")
 end )
 
 concommand.Add("recognize", function(Player, Command, Args)
-	
 	if Args[1] != "" then
 		Recognize(Player, Args[1], 500)
 		
@@ -232,52 +179,74 @@ end)
 concommand.Add("printdata", function(Player)
 	print(GetName(Player))
 	print(GetDescription(Player))
-	PrintTable(Player.KnownPlayers)
+	PrintTable(Player.AliasTable)
 	print(GetCharID(Player))
+	
 end)
 
 --Intermediate Commands
 
+function UpdateCharacterList(Player)
+	local NameList = {}
+	
+	if sql.Query("SELECT name from character_data WHERE creator_uniqueid = "..Player:GetNWInt("UniqueID")) then
+		for k, v in pairs(sql.Query("SELECT name from character_data WHERE creator_uniqueid = "..Player:GetNWInt("UniqueID"))) do
+			NameList[#NameList + 1] = v["name"]
+			
+		end
+		
+	end
+	net.Start("CharacterList")
+	net.WriteTable(NameList)
+	net.Send(Player)
+	
+end
+
 function Recognize(Recognized, Name, Range)
 	
 	for k, Recognizer in pairs(GetPlayersWithinRange(Recognized, Range)) do
-			Recognizer.KnownPlayers[Recognized.CharID] = Name
-			GetCharacter(Recognizer).KnownPlayers[Recognized.CharID] = Name
+		
+		if Recognizer != Recognized then
+			Recognizer.AliasTable[GetCharID(Recognized)] = Name
+			local NewJSON = util.TableToJSON(Recognizer.AliasTable)
+			sql.Query("UPDATE character_data SET alias_table = '"..NewJSON.."' WHERE character_uniqueid = "..GetCharID(Recognizer))
+			Recognizer:SetNWString("AliasTable", NewJSON)
+			
+		end
 		
 	end
 	
-	Synchronize()
+end
+
+function CreateCharacter(Player, Name, Description, Model)
+	local SelfAliasTable = {}
+	sql.Query("INSERT INTO character_data (creator_uniqueid, name, description, character_flags, alias_table, model) VALUES ("..Player:GetNWInt("UniqueID")..", '"..Name.."', '"..Description.."', '', '', '"..Model.."')")
+	local NewID = sql.QueryValue("SELECT MAX(character_uniqueid) from character_data")
+	SelfAliasTable[NewID] = Name
+	local AliasJSON = util.TableToJSON(SelfAliasTable)
+	sql.Query("UPDATE character_data SET alias_table = '"..AliasJSON.."' WHERE character_uniqueid = "..NewID)
+	checkerror()
+	UpdateCharacterList(Player)
 	
 end
 
-function CreateCharacter(Player, Character, Description)
-	local Template = {}
-	Template.Description = Description
-	Template.Inventory = {}
-	Template.CharID = Player:SteamID()..Character
-	Template.KnownPlayers = {}
-	Template.KnownPlayers[Template.CharID] = Character
-	Universe.Players[Player:SteamID()].Characters[Character] = Template
-	SetCharacter(Player, Character)
-	Synchronize()
-	
-end
-
-function SetCharacter(Player, Character)
-	Universe.Players[Player:SteamID()].CurrentCharacter = Character
-	Player.CurrentName = Character --may be deprecated
-	Player.CurrentDescription = Universe.Players[Player:SteamID()].Characters[Character].Description --may be deprecated
-	Player.KnownPlayers = Universe.Players[Player:SteamID()].Characters[Character].KnownPlayers
-	Player.CharID = Universe.Players[Player:SteamID()].Characters[Character].CharID
+function SetCharacter(Player, Name)
+	local CharData = sql.QueryRow("SELECT creator_uniqueid, name, description, character_flags, alias_table, model FROM character_data WHERE name = '"..Name.."'")
+	checkerror()
+	Player:SetNWInt("CharID", sql.QueryValue("SELECT MAX(character_uniqueid) from character_data"))
+	Player:SetNWString("Name", CharData["name"])
+	Player:SetNWString("Description", CharData["description"])
+	Player:SetNWString("Flags", CharData["character_flags"])
+	Player.AliasTable = util.JSONToTable(CharData["alias_table"]) or {}
+	Player:SetNWString("AliasTable", CharData["alias_table"])
+	Player:SetModel(CharData["model"])
 	Player.CharSelected = true
 	Player:Spawn()
-	Synchronize()
 	
 end
 
 function SetDescription(Player, NewDescription)
-	Player.CurrentDescription = NewDescription --may be deprecated
-	GetCharacter(Player).Description = NewDescription
-	Synchronize()
+	Player:SetNWString("Description", NewDescription)
+	sql.Query("UPDATE character_data SET description = '"..NewDescription.."' WHERE character_uniqueid = "..Player:GetNWInt("CharID"))
 	
 end
