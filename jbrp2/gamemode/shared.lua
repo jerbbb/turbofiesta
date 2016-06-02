@@ -4,6 +4,17 @@ GM.Email = "N/A"
 GM.Website = "N/A"
 DeriveGamemode("sandbox")
 
+--GM Hooks
+function GM:PlayerDeath( ply, inflictor, attacker )
+
+	-- Don't spawn for at least 2 seconds
+	ply.NextSpawnTime = CurTime() + 2
+	ply.DeathTime = CurTime()
+	
+	return
+	
+end
+
 --"Get" functions
 
 function GetPlayersWithinRange(Player, Range)
@@ -23,21 +34,16 @@ function GetPlayersWithinRange(Player, Range)
 end
 
 function GetName(Player)
-	return Universe.Players[Player:SteamID()].CurrentCharacter
-	
-end
-
-function GetCharacter(Player)
-	return Universe.Players[Player:SteamID()].Characters[GetName(Player)]
+	return Player:GetNWString("Name")
 	
 end
 
 function GetDescription(Player)
-	return GetCharacter(Player).Description
+	return Player:GetNWString("Description")
 	
 end
 
 function GetCharID(Player)
-	return GetCharacter(Player).CharID
+	return Player:GetNWString("CharID")
 	
 end
